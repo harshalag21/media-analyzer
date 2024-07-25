@@ -9,7 +9,7 @@ class Kafka:
         """
         # Config parsing
         self._config = ConfigParser()
-        self._config.read(["./config.ini"])
+        self._config.read(["./config/config.ini"])
         self._bootstrap_servers = self._config.get("KAFKA", "bootstrap_servers")
 
         try:
@@ -40,3 +40,7 @@ class Kafka:
             self.kafka_producer.flush()
         except Exception as e:
             print(f'Failed to publish message: {e}')
+
+
+if __name__ == "__main__":
+    kafka = Kafka()
