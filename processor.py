@@ -37,6 +37,7 @@ def tags_to_list(x):
 
 if __name__ == "__main__":
     # TODO: change to kafka streaming
+    """
     # Read stream from Kafka
     articles = (
         spark
@@ -47,6 +48,7 @@ if __name__ == "__main__":
         .load()
         .selectExpr("CAST(value AS STRING)")
     )
+    """
     schema = StructType([
         StructField("url", StringType(), True),
         StructField("date", StringType(), True),
