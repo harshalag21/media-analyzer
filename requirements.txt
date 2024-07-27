@@ -2,3 +2,4 @@ kafka-python==2.0.2
 spark-nlp==5.4.1
 sparknlp==1.0.0
 pyspark==3.5.1
+selenium==4.23.1
