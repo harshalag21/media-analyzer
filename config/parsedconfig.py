@@ -1,13 +1,20 @@
-from configparser import ConfigParser
+import configparser
 
-config = ConfigParser()
-config.read(["./config/config.ini"])
+bootstrap_servers = None
+input_topic = None
+output_topic = None
+sentiment_analysis_model_path = None
+category_detection_model_path = None
+bias_detection_model_path = None
 
-bootstrapServers = config.get("KAFKA", "bootstrap_servers")
 
-input_topic = config.get("TOPICS", "input_topic")
-output_topic = config.get("TOPICS", "output_topic")
+config = configparser.ConfigParser()
+config.read("config.ini")
 
-sentiment_analysis_model_path = config.get("MODELS", "sentiment_analysis_model")
-category_detection_model_path = config.get("MODELS", "category_detection_model")
-bias_detection_model_path= config.get("MODELS", "bias_detection_model")
+for section in config.sections():
+    for key, value in config.items(section):
+        globals()[key] = value
+
+
+if __name__ == '__main__':
+    print(input_topic)
