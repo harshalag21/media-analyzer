@@ -1,31 +1,41 @@
 import shutil
-
-
-from configparser import ConfigParser
 from functools import reduce
 
+import sparknlp
+
+from config.parsedconfig import *
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import explode, split, desc, col, lower, regexp_replace, udf, trim, to_json, struct
-from pyspark.sql.types import StructType, StructField, StringType, ArrayType
+from pyspark.sql.functions import col, udf, to_json, struct
+from pyspark.sql.types import StructType, StructField, StringType
+from pyspark.ml import PipelineModel
+
+# spark-submit --packages com.johnsnowlabs.nlp:spark-nlp-silicon_2.12:5.4.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 processor.py
 
 # Remove the previous checkpoints if present
 shutil.rmtree('./tmp', ignore_errors=True)
 
-
-# Config parsing
-_config = ConfigParser()
-_config.read(["./config/config.ini"])
-bootstrapServers = _config.get("KAFKA", "bootstrap_servers")
-input_topic = _config.get("TOPICS", "input_topic")
-output_topic = _config.get("TOPICS", "output_topic")
-
+# Load ML models
+sentiment_analysis_model = (
+    PipelineModel
+    .load(sentiment_analysis_model_path)
+)
+"""category_detection_model = (
+    PipelineModel
+    .load(category_detection_model_path)
+)
+bias_detection_model = (
+    PipelineModel
+    .load(bias_detection_model_path)
+)"""
+#  org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1
 # Initialize spark
-spark = (
+"""spark = (
     SparkSession
     .builder
     .appName("media-bias-detection")
     .getOrCreate()
-)
+)"""
+spark = sparknlp.start()
 spark.sparkContext.setLogLevel("ERROR")
 spark.sparkContext.setCheckpointDir("./tmp")
 
@@ -42,17 +52,12 @@ def predict_sentiment(x):
 
 @udf()
 def predict_category(x):
-    return random_value(["buisness", "tech", "political", "global", "entertainment"])
+    return random_value(["business", "tech", "political", "global", "entertainment"])
 
 
 @udf()
 def predict_leaning(x):
     return random_value(["left", "right", "center"])
-
-
-@udf(returnType=ArrayType(StringType()))
-def tags_to_list(x):
-    return x.strip('][').split(', ')
 
 
 if __name__ == "__main__":
@@ -95,14 +100,21 @@ if __name__ == "__main__":
         .schema(schema)
         .csv("./scraper/data/")
         .filter(filter_condition)
-        .select(col("heading").alias("value"))
+        .select(col("heading").alias("text"))
     )
 
-    filtered_stream_df = (
+    data = (
+        sentiment_analysis_model
+        .transform(data)
+        .select(col("text").alias("value"), col("class.result").alias("sentiment"))
+    )
+
+    data = (
         data
         .select(
             col("value").alias("heading"),
-            predict_sentiment(col("value")).alias("sentiment"),
+            "sentiment",
+            # predict_sentiment(col("value")).alias("sentiment"),
             predict_category(col("value")).alias("category"),
             predict_leaning(col("value")).alias("bias_rating")
         )
@@ -110,7 +122,7 @@ if __name__ == "__main__":
 
     """
     # Output to console
-    query = filtered_stream_df \
+    query = data \
         .writeStream \
         .outputMode('append') \
         .format('console') \
@@ -120,7 +132,7 @@ if __name__ == "__main__":
 
     # Output to Kafka topic further connected to ELK
     query = (
-        filtered_stream_df
+        data
         .select(
             to_json(
                 struct(
@@ -134,7 +146,7 @@ if __name__ == "__main__":
         .format("kafka")
         .outputMode("update")
         .option("checkpointLocation", "./tmp")
-        .option("kafka.bootstrap.servers", bootstrapServers)
+        .option("kafka.bootstrap.servers", bootstrap_servers)
         .option("topic", output_topic)
         .start()
     )
