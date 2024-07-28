@@ -1,4 +1,4 @@
-from configparser import ConfigParser
+from config.parsedconfig import *
 from kafka import KafkaProducer
 
 
@@ -7,17 +7,12 @@ class Kafka:
         """
         Initialize Kafka producer class
         """
-        # Config parsing
-        self._config = ConfigParser()
-        self._config.read(["./config/config.ini"])
-        self._bootstrap_servers = self._config.get("KAFKA", "bootstrap_servers")
-
         try:
             # Initialise Kafka producer instance
             self.kafka_producer = KafkaProducer(
-                bootstrap_servers=[self._bootstrap_servers],
+                bootstrap_servers=[bootstrapServers],
                 linger_ms=10000)
-            print(f"Connected to Kafka@{self._bootstrap_servers}")
+            print(f"Connected to Kafka@{bootstrapServers}")
         except Exception as e:
             print(f"Failed to connect to Kafka: {e}")
 
