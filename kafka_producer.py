@@ -10,9 +10,9 @@ class Kafka:
         try:
             # Initialise Kafka producer instance
             self.kafka_producer = KafkaProducer(
-                bootstrap_servers=[bootstrapServers],
+                bootstrap_servers=[bootstrap_servers],
                 linger_ms=10000)
-            print(f"Connected to Kafka@{bootstrapServers}")
+            print(f"Connected to Kafka@{bootstrap_servers}")
         except Exception as e:
             print(f"Failed to connect to Kafka: {e}")
 
