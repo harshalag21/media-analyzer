@@ -27,7 +27,7 @@ bias_detection_model = (
     PipelineModel
     .load(bias_detection_model_path)
 )"""
-#  org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1
+
 # Initialize spark
 """spark = (
     SparkSession
