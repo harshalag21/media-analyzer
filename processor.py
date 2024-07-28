@@ -30,6 +30,26 @@ spark.sparkContext.setLogLevel("ERROR")
 spark.sparkContext.setCheckpointDir("./tmp")
 
 
+def random_value(values):
+    import random
+    return random.choice(values)
+
+
+@udf()
+def predict_sentiment(x):
+    return random_value(["positive", "negative", "neutral"])
+
+
+@udf()
+def predict_category(x):
+    return random_value(["buisness", "tech", "political", "global", "entertainment"])
+
+
+@udf()
+def predict_leaning(x):
+    return random_value(["left", "right", "center"])
+
+
 @udf(returnType=ArrayType(StringType()))
 def tags_to_list(x):
     return x.strip('][').split(', ')
@@ -39,7 +59,7 @@ if __name__ == "__main__":
     # TODO: change to kafka streaming
     """
     # Read stream from Kafka
-    articles = (
+    data = (
         spark
         .readStream
         .format("kafka")
@@ -49,6 +69,8 @@ if __name__ == "__main__":
         .selectExpr("CAST(value AS STRING)")
     )
     """
+
+    # Reading from CSV file
     schema = StructType([
         StructField("url", StringType(), True),
         StructField("date", StringType(), True),
@@ -59,7 +81,11 @@ if __name__ == "__main__":
         StructField("text", StringType(), True),
         StructField("bias_rating", StringType(), True)
     ])
-
+    # Create a filter condition for non-null values for all columns
+    filter_condition = reduce(
+        lambda a, b: a & b,
+        [col(c).isNotNull() for c in ["heading"]]
+    )
     data = (
         spark
         .readStream
@@ -68,25 +94,23 @@ if __name__ == "__main__":
         .option("header", "true")
         .schema(schema)
         .csv("./scraper/data/")
+        .filter(filter_condition)
+        .select(col("heading").alias("value"))
     )
-    columns = data.columns
 
-    # Create a filter condition for non-null values for all columns
-    filter_condition = reduce(
-        lambda a, b: a & b,
-        [col(c).isNotNull() for c in columns]
-    )
     filtered_stream_df = (
         data
-        .filter(filter_condition)
         .select(
-            tags_to_list(col("tags")).alias("tag_list"),
-            "heading",
-            "text",
-            "bias_rating"
+            col("value").alias("heading"),
+            predict_sentiment(col("value")).alias("sentiment"),
+            predict_category(col("value")).alias("category"),
+            predict_leaning(col("value")).alias("bias_rating")
         )
     )
-    """ query = filtered_stream_df \
+
+    """
+    # Output to console
+    query = filtered_stream_df \
         .writeStream \
         .outputMode('append') \
         .format('console') \
@@ -100,9 +124,9 @@ if __name__ == "__main__":
         .select(
             to_json(
                 struct(
-                    col("tag_list"),
                     col("heading"),
-                    col("text"),
+                    col("sentiment"),
+                    col("category"),
                     col("bias_rating")
                 )
             ).alias("value"))
