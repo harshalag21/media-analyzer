@@ -46,11 +46,6 @@ def random_value(values):
 
 
 @udf()
-def predict_sentiment(x):
-    return random_value(["positive", "negative", "neutral"])
-
-
-@udf()
 def predict_category(x):
     return random_value(["business", "tech", "political", "global", "entertainment"])
 
@@ -72,6 +67,7 @@ if __name__ == "__main__":
         .option("subscribe", input_topic)
         .load()
         .selectExpr("CAST(value AS STRING)")
+        .select(col("value").alias("text"))
     )
     """
 
@@ -106,28 +102,32 @@ if __name__ == "__main__":
     data = (
         sentiment_analysis_model
         .transform(data)
-        .select(col("text").alias("value"), col("class.result").alias("sentiment"))
+        .select(
+            col("text").alias("heading"),
+            col("class.result").alias("sentiment")
+        )
     )
 
     data = (
         data
         .select(
-            col("value").alias("heading"),
+            "heading",
             "sentiment",
             # predict_sentiment(col("value")).alias("sentiment"),
-            predict_category(col("value")).alias("category"),
-            predict_leaning(col("value")).alias("bias_rating")
+            predict_category(col("heading")).alias("category"),
+            predict_leaning(col("heading")).alias("bias_rating")
         )
     )
 
     """
     # Output to console
-    query = data \
-        .writeStream \
-        .outputMode('append') \
-        .format('console') \
+    query = (
+        data 
+        .writeStream 
+        .outputMode('append') 
+        .format('console') 
         .start()
-    query.awaitTermination()
+    )
     """
 
     # Output to Kafka topic further connected to ELK
