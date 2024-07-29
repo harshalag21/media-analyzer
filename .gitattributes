@@ -1,2 +1,9 @@
 models/** filter=lfs diff=lfs merge=lfs -text
 models/sentiment-analysis-model.zip filter=lfs diff=lfs merge=lfs -text
+models/sentiment-analysis/metadata/_SUCCESS filter=lfs diff=lfs merge=lfs -text
+models/sentiment-analysis/metadata/part-00000 filter=lfs diff=lfs merge=lfs -text
+models/sentiment-analysis/stages/0_DocumentAssembler_4ab07fc8ce0d filter=lfs diff=lfs merge=lfs -text
+models/sentiment-analysis/stages/1_REGEX_TOKENIZER_ffe806477711 filter=lfs diff=lfs merge=lfs -text
+models/sentiment-analysis/stages/2_BERT_EMBEDDINGS_25cb4e31e278 filter=lfs diff=lfs merge=lfs -text
+models/sentiment-analysis/stages/3_SentenceEmbeddings_1ad725460713 filter=lfs diff=lfs merge=lfs -text
+models/sentiment-analysis/stages/4_ClassifierDLModel_8de495472a9f filter=lfs diff=lfs merge=lfs -text
