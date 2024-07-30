@@ -3,7 +3,6 @@ from functools import reduce
 
 import mlflow
 import sparknlp
-import logging
 from config.parsedconfig import *
 from pyspark.sql.functions import col, udf, to_json, struct
 from pyspark.sql.types import StructType, StructField, StringType
@@ -34,8 +33,6 @@ bias_detection_model = (
 spark = sparknlp.start()
 spark.sparkContext.setLogLevel("ERROR")
 spark.sparkContext.setCheckpointDir("./tmp")
-logging.getLogger("org").setLevel(logging.ERROR)
-logging.getLogger("akka").setLevel(logging.ERROR)
 
 
 @udf()
@@ -43,7 +40,7 @@ def predict_category(x):
     try:
         return category_detection_model.predict(str(x)).to_dict()['label'][0]
     except mlflow.exceptions.MlflowException as e:
-        logging.error(e)
+        print(f"Mlflow Exception: {e}")
         return "General"
 
 
