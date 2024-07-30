@@ -1,5 +1,4 @@
 import shutil
-import sys
 from functools import reduce
 
 import mlflow
@@ -122,7 +121,7 @@ if __name__ == "__main__":
     query = (
         data 
         .writeStream 
-        .outputMode('append') 
+        .outputMode('complete') 
         .format('console') 
         .start()
     )
