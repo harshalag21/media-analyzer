@@ -1,15 +1,15 @@
 import shutil
+import sys
 from functools import reduce
 
+import mlflow
 import sparknlp
 
 from config.parsedconfig import *
-from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, udf, to_json, struct
 from pyspark.sql.types import StructType, StructField, StringType
 from pyspark.ml import PipelineModel
 
-# spark-submit --packages com.johnsnowlabs.nlp:spark-nlp-silicon_2.12:5.4.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 processor.py
 
 # Remove the previous checkpoints if present
 shutil.rmtree('./tmp', ignore_errors=True)
@@ -19,39 +19,36 @@ sentiment_analysis_model = (
     PipelineModel
     .load(sentiment_analysis_model_path)
 )
-"""category_detection_model = (
-    PipelineModel
-    .load(category_detection_model_path)
+category_detection_model = (
+    mlflow
+    .pyfunc
+    .load_model(category_detection_model_path)
 )
+
+"""
 bias_detection_model = (
     PipelineModel
     .load(bias_detection_model_path)
 )"""
 
 # Initialize spark
-"""spark = (
-    SparkSession
-    .builder
-    .appName("media-bias-detection")
-    .getOrCreate()
-)"""
 spark = sparknlp.start()
 spark.sparkContext.setLogLevel("ERROR")
 spark.sparkContext.setCheckpointDir("./tmp")
 
 
-def random_value(values):
-    import random
-    return random.choice(values)
-
-
 @udf()
 def predict_category(x):
-    return random_value(["business", "tech", "political", "global", "entertainment"])
-
+    try:
+        return category_detection_model.predict(str(x)).to_dict()['label'][0]
+    except Exception as e:
+        return "General"
 
 @udf()
 def predict_leaning(x):
+    def random_value(values):
+        import random
+        return random.choice(values)
     return random_value(["left", "right", "center"])
 
 
@@ -99,6 +96,7 @@ if __name__ == "__main__":
         .select(col("heading").alias("text"))
     )
 
+    # Sentiment prediction
     data = (
         sentiment_analysis_model
         .transform(data)
@@ -108,12 +106,12 @@ if __name__ == "__main__":
         )
     )
 
+    # Category and Bias prediction
     data = (
         data
         .select(
             "heading",
             "sentiment",
-            # predict_sentiment(col("value")).alias("sentiment"),
             predict_category(col("heading")).alias("category"),
             predict_leaning(col("heading")).alias("bias_rating")
         )
