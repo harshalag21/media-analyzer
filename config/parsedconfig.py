@@ -5,6 +5,8 @@ config.read(["./config/config.ini"])
 
 bootstrap_servers = config.get("KAFKA", "bootstrap_servers")
 
+news_api_key = config.get("NEWSAPI", "news_api_key")
+
 input_topic = config.get("TOPICS", "input_topic")
 output_topic = config.get("TOPICS", "output_topic")
 
