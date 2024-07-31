@@ -16,16 +16,17 @@ class Kafka:
         except Exception as e:
             print(f"Failed to connect to Kafka: {e}")
 
-    def publish(self, text, topic):
+    def publish(self, text, topic, key="key"):
         """
         Publish message to Kafka topic
         :param text: message to be published
         :param topic: kafka topic name
+        :param key: kafka key name
         :return:
         """
         try:
             # Encode message
-            key_bytes = bytes('post', encoding='utf-8')
+            key_bytes = bytes(key, encoding='utf-8')
             value_bytes = bytes(text, encoding='utf-8')
             # Publish to Kafka
             self.kafka_producer.send(
