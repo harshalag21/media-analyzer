@@ -1,11 +1,9 @@
 import shutil
-from functools import reduce
 
 import mlflow
 import sparknlp
 from config.parsedconfig import *
 from pyspark.sql.functions import col, udf, to_json, struct
-from pyspark.sql.types import StructType, StructField, StringType
 from pyspark.ml import PipelineModel
 
 
@@ -22,12 +20,10 @@ category_detection_model = (
     .pyfunc
     .load_model(category_detection_model_path)
 )
-
-"""
 bias_detection_model = (
     PipelineModel
     .load(bias_detection_model_path)
-)"""
+)
 
 # Initialize spark
 spark = sparknlp.start()
@@ -44,30 +40,20 @@ def predict_category(x):
         return "General"
 
 
-@udf()
-def predict_leaning(x):
-    def random_value(values):
-        import random
-        return random.choice(values)
-    return random_value(["left", "right", "center"])
-
-
 if __name__ == "__main__":
-    # TODO: change to kafka streaming
-    """
     # Read stream from Kafka
     data = (
         spark
         .readStream
         .format("kafka")
-        .option("kafka.bootstrap.servers", bootstrapServers)
+        .option("kafka.bootstrap.servers", bootstrap_servers)
         .option("subscribe", input_topic)
         .load()
         .selectExpr("CAST(value AS STRING)")
         .select(col("value").alias("text"))
     )
-    """
 
+    """
     # Reading from CSV file
     schema = StructType([
         StructField("url", StringType(), True),
@@ -95,25 +81,37 @@ if __name__ == "__main__":
         .filter(filter_condition)
         .select(col("heading").alias("text"))
     )
+    """
 
     # Sentiment prediction
     data = (
         sentiment_analysis_model
         .transform(data)
         .select(
-            col("text").alias("heading"),
+            "text",
             col("class.result").alias("sentiment")
         )
     )
 
-    # Category and Bias prediction
+    # Bias rating prediction
+    data = (
+        bias_detection_model
+        .transform(data)
+        .select(
+            col("text").alias("heading"),
+            "sentiment",
+            col("class.result").alias("bias_rating")
+        )
+    )
+
+    # Category prediction
     data = (
         data
         .select(
             "heading",
             "sentiment",
+            "bias_rating",
             predict_category(col("heading")).alias("category"),
-            predict_leaning(col("heading")).alias("bias_rating")
         )
     )
 
@@ -122,7 +120,7 @@ if __name__ == "__main__":
     query = (
         data 
         .writeStream 
-        .outputMode('complete') 
+        .outputMode('append')
         .format('console') 
         .start()
     )
