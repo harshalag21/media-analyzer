@@ -49,45 +49,18 @@ if __name__ == "__main__":
         .option("kafka.bootstrap.servers", bootstrap_servers)
         .option("subscribe", input_topic)
         .load()
-        .selectExpr("CAST(value AS STRING)")
-        .select(col("value").alias("text"))
+        .select(
+            col("key").cast("string").alias("source"),
+            col("value").cast("string").alias("text")
+        )
     )
-
-    """
-    # Reading from CSV file
-    schema = StructType([
-        StructField("url", StringType(), True),
-        StructField("date", StringType(), True),
-        StructField("title", StringType(), True),
-        StructField("tags", StringType(), True),
-        StructField("heading", StringType(), True),
-        StructField("source", StringType(), True),
-        StructField("text", StringType(), True),
-        StructField("bias_rating", StringType(), True)
-    ])
-    # Create a filter condition for non-null values for all columns
-    filter_condition = reduce(
-        lambda a, b: a & b,
-        [col(c).isNotNull() for c in ["heading"]]
-    )
-    data = (
-        spark
-        .readStream
-        .option("sep", "|")
-        .option("multiLine", "true")
-        .option("header", "true")
-        .schema(schema)
-        .csv("./scraper/data/")
-        .filter(filter_condition)
-        .select(col("heading").alias("text"))
-    )
-    """
 
     # Sentiment prediction
     data = (
         sentiment_analysis_model
         .transform(data)
         .select(
+            "source",
             "text",
             col("class.result").alias("sentiment")
         )
@@ -98,6 +71,7 @@ if __name__ == "__main__":
         bias_detection_model
         .transform(data)
         .select(
+            "source",
             col("text").alias("heading"),
             "sentiment",
             col("class.result").alias("bias_rating")
@@ -108,6 +82,7 @@ if __name__ == "__main__":
     data = (
         data
         .select(
+            "source",
             "heading",
             "sentiment",
             "bias_rating",
@@ -120,7 +95,7 @@ if __name__ == "__main__":
     query = (
         data 
         .writeStream 
-        .outputMode('append')
+        .outputMode('update')
         .format('console') 
         .start()
     )
@@ -132,6 +107,7 @@ if __name__ == "__main__":
         .select(
             to_json(
                 struct(
+                    col("source"),
                     col("heading"),
                     col("sentiment"),
                     col("category"),
