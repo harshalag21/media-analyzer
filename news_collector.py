@@ -69,14 +69,14 @@ class RedditScraper:
             sys.exit(1)
 
         # Streaming to Kafka
-        print(f"Fetching top posts from: {subreddit}")
+        """print(f"Fetching top posts from: {subreddit}")
         for submission in self.reddit.subreddit(subreddit).new(limit=1000):
             if submission is None:
                 break
             self._publish_submission(
                 extract_hostname(submission.url),
                 submission.title
-            )
+            )"""
         print(f"\nStreaming subreddits: {subreddit}")
         for submission in streamer.submissions():
             if submission is None:
