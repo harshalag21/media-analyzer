@@ -1,29 +1,12 @@
 import nltk
-import shutil
-
-
-from configparser import ConfigParser
 from nltk import ne_chunk, pos_tag, word_tokenize, Tree
 from pyspark.sql.functions import explode, split, col, lower, regexp_replace, udf, trim, to_json, struct
-
-# Remove the previous checkpoints if present
-shutil.rmtree('./tmp1', ignore_errors=True)
 
 # NLTK modules downloads
 nltk.download("punkt")
 nltk.download("averaged_perceptron_tagger")
 nltk.download("maxent_ne_chunker")
 nltk.download("words")
-
-
-# Config parsing
-_config = ConfigParser()
-_config.read(["config/config.ini"])
-bootstrapServers = _config.get("KAFKA", "bootstrap_servers")
-input_topic = _config.get("TOPICS", "input_topic")
-output_topic = _config.get("TOPICS", "output_topic")
-
-# Initialize spark
 
 
 @udf()
@@ -48,7 +31,7 @@ def extract_named_entities(x):
     return continuous_chunk
 
 
-def ner_extraction(articles):
+def count_ner(articles):
     # Extract named entities and clean the text
     named_entities = (
         articles

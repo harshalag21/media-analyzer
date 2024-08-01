@@ -6,7 +6,7 @@ from config.parsedconfig import *
 from pyspark.sql.functions import col, udf, to_json, struct
 from pyspark.ml import PipelineModel
 
-from ner_analyser import ner_extraction
+from ner_analyser import count_ner
 
 # Remove the previous checkpoints if present
 shutil.rmtree('./tmp', ignore_errors=True)
@@ -55,7 +55,7 @@ if __name__ == "__main__":
             col("value").cast("string").alias("text")
         )
     )
-    ner_query = ner_extraction(data)
+    ner_query = count_ner(data)
 
     # Sentiment prediction
     data = (
