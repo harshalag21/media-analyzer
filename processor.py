@@ -6,6 +6,7 @@ from config.parsedconfig import *
 from pyspark.sql.functions import col, udf, to_json, struct
 from pyspark.ml import PipelineModel
 
+from ner_analyser import ner_extraction
 
 # Remove the previous checkpoints if present
 shutil.rmtree('./tmp', ignore_errors=True)
@@ -54,6 +55,7 @@ if __name__ == "__main__":
             col("value").cast("string").alias("text")
         )
     )
+    ner_query = ner_extraction(data)
 
     # Sentiment prediction
     data = (
@@ -86,24 +88,8 @@ if __name__ == "__main__":
             "heading",
             "sentiment",
             "bias_rating",
-            predict_category(col("heading")).alias("category"),
+            predict_category(col("heading")).alias("category")
         )
-    )
-
-    """
-    # Output to console
-    query = (
-        data 
-        .writeStream 
-        .outputMode('update')
-        .format('console') 
-        .start()
-    )
-    """
-
-    # Output to Kafka topic further connected to ELK
-    query = (
-        data
         .select(
             to_json(
                 struct(
@@ -114,6 +100,24 @@ if __name__ == "__main__":
                     col("bias_rating")
                 )
             ).alias("value"))
+    )
+
+    data = data.union(ner_query)
+
+    """
+    # Output to console
+    query = (
+        data
+        .writeStream 
+        .outputMode('update')
+        .format('console') 
+        .start()
+    )
+    """
+
+    # Output to Kafka topic further connected to ELK
+    query = (
+        data
         .writeStream
         .format("kafka")
         .outputMode("update")
