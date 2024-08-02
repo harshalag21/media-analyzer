@@ -9,7 +9,9 @@
     * [Kafka and ELK setup:](#kafka-and-elk-setup)
     * [Run code](#run-code)
     * [Kibana dashboard](#kibana-dashboard)
-  * [File description:](#file-description)
+  * [Repository details:](#repository-details)
+    * [File description:](#file-description)
+    * [Directory structure](#directory-structure)
 <!-- TOC -->
 
 ---
@@ -79,7 +81,8 @@ Sample dashboard designed is mentioned in reports.
 
 ---
 
-## File description:
+## Repository details:
+### File description:
 1. Media Bias Dashboard - Elastic.pdf: Screenshot of dashboard
 2. kafka_producer.py: python script for handling kafka connection
 3. ner_analyser.py: pyspark script for extracting named entity count
@@ -87,6 +90,7 @@ Sample dashboard designed is mentioned in reports.
 5. processor.py: pyspark script for handling data processing and prediction
 6. models/training: this directory has all the notebooks(colab) used for model training
 7. models/training/data: this directory has all the training data
+### Directory structure
 ```commandline
 (.venv) ~/UTD/6350_BDA/media-bias-detector git:[main]
 .
