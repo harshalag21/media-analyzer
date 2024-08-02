@@ -96,15 +96,15 @@ Sample dashboard designed is mentioned in reports.
 │         ├── category-detection
 │         ├── sentiment-analysis
 │         └── training
-│             ├── bias_detection.ipynb
-│             ├── data
-│             │         ├── category_detection_training.csv
-│             │         ├── news_category_test.csv
-│             │         ├── news_category_train.csv
-│             │         └── sentiment_analysis_training.csv
-│             ├── news_category_fine_tuning.ipynb
-│             ├── prediction.ipynb
-│             └── sentiment_analysis.ipynb
+│                     ├── bias_detection.ipynb
+│                     ├── data
+│                     │       ├── category_detection_training.csv
+│                     │       ├── news_category_test.csv
+│                     │       ├── news_category_train.csv
+│                     │       └── sentiment_analysis_training.csv
+│                     ├── news_category_fine_tuning.ipynb
+│                     ├── prediction.ipynb
+│                     └── sentiment_analysis.ipynb
 ├── ner_analyser.py
 ├── news_collector.py
 ├── processor.py
