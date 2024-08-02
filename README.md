@@ -2,7 +2,15 @@
 
 ---
 
-
+<!-- TOC -->
+* [Real-Time News Detection and Analysis using Deep Learning and Large Language Models](#real-time-news-detection-and-analysis-using-deep-learning-and-large-language-models-)
+  * [Execution Steps:](#execution-steps)
+    * [Codebase setup:](#codebase-setup)
+    * [Kafka and ELK setup:](#kafka-and-elk-setup)
+    * [Run code](#run-code)
+    * [Kibana dashboard](#kibana-dashboard)
+  * [File description:](#file-description)
+<!-- TOC -->
 
 ---
 
