@@ -1,0 +1,750 @@
+import re
+import sys
+
+import newsapi.newsapi_exception
+from newsapi import NewsApiClient
+import praw
+from praw import exceptions as praw_exceptions
+from praw.models.reddit.subreddit import SubredditStream
+from config.parsedconfig import *
+from kafka_producer import Kafka
+
+
+def extract_hostname(url_string):
+    """
+    Extract the hostname from the url string
+    :param url_string:
+    :return:
+    """
+    pattern = r'^(?:https?:\/\/)?(?:www\.)?([^\/:]+)'
+    match = re.search(pattern, url_string)
+    if match:
+        return match.group(1)
+    return "user"
+
+
+class RedditScraper:
+    def __init__(self):
+        """
+        Initializes the Reddit Scraper class
+        """
+        self.message_sent = 1
+        try:
+            # Initialise reddit API
+            self.reddit = praw.Reddit(
+                client_id=reddit_client_id,
+                client_secret=reddit_client_secret,
+                password=reddit_password,
+                user_agent=reddit_user_agent,
+                username=reddit_username,
+            )
+            print(f"Connected to Reddit: {reddit_username}")
+        except praw_exceptions.PRAWException as rde:
+            print(f"Failed to connect to Reddit: {rde}")
+
+        # Initialize Kafka producer
+        self.kafka_producer = Kafka()
+
+    def _publish_submission(self, source, headline):
+        self.kafka_producer.publish(
+            key=source,
+            text=f"{headline}",
+            topic=input_topic,
+        )
+        sys.stdout.write(f"\rSent {self.message_sent} articles to Kafka queue")
+        self.message_sent += 1
+
+    def stream(self, subreddit="news"):
+        """
+        Stream subreddits to Kafka topic
+        :param subreddit: name of subreddit to stream
+        :return:
+        """
+        try:
+            # Generate streamer instance
+            streamer = SubredditStream(self.reddit.subreddit(subreddit))
+            print(f"Connected to Subreddit: {subreddit}")
+        except praw_exceptions.PRAWException as rde:
+            print(f"Failed to connect to Subreddit: {rde}")
+            sys.exit(1)
+
+        # Streaming to Kafka
+        """print(f"Fetching top posts from: {subreddit}")
+        for submission in self.reddit.subreddit(subreddit).new(limit=1000):
+            if submission is None:
+                break
+            self._publish_submission(
+                extract_hostname(submission.url),
+                submission.title
+            )"""
+        print(f"\nStreaming subreddits: {subreddit}")
+        for submission in streamer.submissions():
+            if submission is None:
+                continue
+            self._publish_submission(
+                extract_hostname(submission.url),
+                submission.title
+            )
+
+
+class NewsCollector:
+    def __init__(self):
+        self.message_sent = 1
+        try:
+            # Initialise News API
+            self.newsapi = NewsApiClient(api_key=news_api_key)
+            print(f"Connected to NewsAPI")
+        except newsapi.newsapi_exception.NewsAPIException as nwe:
+            print(f"Failed to connect to NewsAPI: {nwe}")
+
+        # Initialize Kafka producer
+        self.kafka_producer = Kafka()
+        self.processed_id = set()
+
+    def _publish_submission(self, source, headline):
+        self.kafka_producer.publish(
+            key=source,
+            text=headline,
+            topic=input_topic
+        )
+        sys.stdout.write(f"\rSent {self.message_sent} articles to Kafka queue")
+        self.message_sent += 1
+
+    @staticmethod
+    def _check_article(article):
+        return (
+                "title" in article and
+                "url" in article and
+                article["title"] is not None and
+                "[Removed]" not in article["title"]
+        )
+
+    def stream_news(self):
+        page = 1
+        while True:
+            response = self.newsapi.get_top_headlines(page=page, page_size=100, language='en')
+            articles = response.get('articles', [])
+            if not articles:
+                break
+            for article in articles:
+                if self._check_article:
+                    if f"{extract_hostname(article.get('url'))}_{article.get('title')}" not in self.processed_id:
+                        self.processed_id.add(
+                            f"{extract_hostname(article.get('url'))}_{article.get('title')}"
+                        )
+                        self._publish_submission(
+                            source=extract_hostname(article.get('url')),
+                            headline=article.get("title")
+                        )
+            page += 1
+
+
+if __name__ == "__main__":
+    try:
+        news_fetcher = NewsCollector()
+        news_fetcher.stream_news()
+    except newsapi.newsapi_exception.NewsAPIException as e:
+        print(f"\nNewsAPI limit reached, switching to Reddit source")
+        reddit = RedditScraper()
+        reddit.stream()
+
+
+
+import shutil
+
+import mlflow
+import sparknlp
+from config.parsedconfig import *
+from pyspark.sql.functions import col, udf, to_json, struct
+from pyspark.ml import PipelineModel
+
+from ner_analyser import count_ner
+
+# Remove the previous checkpoints if present
+shutil.rmtree('./tmp', ignore_errors=True)
+
+# Load ML models
+sentiment_analysis_model = (
+    PipelineModel
+    .load(sentiment_analysis_model_path)
+)
+category_detection_model = (
+    mlflow
+    .pyfunc
+    .load_model(category_detection_model_path)
+)
+bias_detection_model = (
+    PipelineModel
+    .load(bias_detection_model_path)
+)
+
+# Initialize spark
+spark = sparknlp.start()
+spark.sparkContext.setLogLevel("ERROR")
+spark.sparkContext.setCheckpointDir("./tmp")
+
+
+@udf()
+def predict_category(x):
+    try:
+        return category_detection_model.predict(str(x)).to_dict()['label'][0]
+    except mlflow.exceptions.MlflowException as e:
+        print(f"Mlflow Exception: {e}")
+        return "General"
+
+
+if __name__ == "__main__":
+    # Read stream from Kafka
+    data = (
+        spark
+        .readStream
+        .format("kafka")
+        .option("kafka.bootstrap.servers", bootstrap_servers)
+        .option("subscribe", input_topic)
+        .load()
+        .select(
+            col("key").cast("string").alias("source"),
+            col("value").cast("string").alias("text")
+        )
+    )
+    ner_query = count_ner(data)
+
+    # Sentiment prediction
+    data = (
+        sentiment_analysis_model
+        .transform(data)
+        .select(
+            "source",
+            "text",
+            col("class.result").alias("sentiment")
+        )
+    )
+
+    # Bias rating prediction
+    data = (
+        bias_detection_model
+        .transform(data)
+        .select(
+            "source",
+            col("text").alias("heading"),
+            "sentiment",
+            col("class.result").alias("bias_rating")
+        )
+    )
+
+    # Category prediction
+    data = (
+        data
+        .select(
+            "source",
+            "heading",
+            "sentiment",
+            "bias_rating",
+            predict_category(col("heading")).alias("category")
+        )
+        .select(
+            to_json(
+                struct(
+                    col("source"),
+                    col("heading"),
+                    col("sentiment"),
+                    col("category"),
+                    col("bias_rating")
+                )
+            ).alias("value"))
+    )
+
+    data = data.union(ner_query)
+
+    """
+    # Output to console
+    query = (
+        data
+        .writeStream
+        .outputMode('update')
+        .format('console')
+        .start()
+    )
+    """
+
+    # Output to Kafka topic further connected to ELK
+    query = (
+        data
+        .writeStream
+        .format("kafka")
+        .outputMode("update")
+        .option("checkpointLocation", "./tmp")
+        .option("kafka.bootstrap.servers", bootstrap_servers)
+        .option("topic", output_topic)
+        .start()
+    )
+
+    # Wrap up
+    query.awaitTermination()
+    spark.stop()
+
+
+
+import nltk
+from nltk import ne_chunk, pos_tag, word_tokenize, Tree
+from pyspark.sql.functions import explode, split, col, lower, regexp_replace, udf, trim, to_json, struct
+
+# NLTK modules downloads
+nltk.download("punkt")
+nltk.download("averaged_perceptron_tagger")
+nltk.download("maxent_ne_chunker")
+nltk.download("words")
+
+
+@udf()
+def extract_named_entities(x):
+    """
+    Extract named entities from a sentence.
+    :param x: sentence
+    :return: list of entities
+    """
+    continuous_chunk = []
+    current_chunk = []
+    for i in ne_chunk(pos_tag(word_tokenize(x))):
+        if type(i) is Tree:
+            current_chunk.append(" ".join([token for token, pos in i.leaves()]))
+        if current_chunk:
+            named_entity = " ".join(current_chunk)
+            if named_entity not in continuous_chunk and len(named_entity.split()) > 0:
+                continuous_chunk.append(named_entity)
+                current_chunk = []
+        else:
+            continue
+    return continuous_chunk
+
+
+def count_ner(articles):
+    # Extract named entities and clean the text
+    named_entities = (
+        articles
+        .select(extract_named_entities(col("text")).alias("value"))
+        .withColumn('value', lower('value'))
+        .withColumn("value", regexp_replace("value", r"[^ a-zA-Z0-9]+", ""))
+    )
+
+    # Generate word count
+    output = (
+        named_entities
+        .select(
+            explode(split(named_entities.value, ' '))
+            .alias('word')
+        )
+        .withColumn("word", regexp_replace("word", r"^\s+$", ""))
+        .filter(trim(col("word")) != "")
+        .groupBy('word')
+        .count()
+        .select(to_json(struct(col("word"), col("count"))).alias("value"))
+    )
+
+    return output
+
+
+
+
+
+
+import sparknlp
+
+from sparknlp.base import *
+from sparknlp.annotator import *
+from pyspark.ml import Pipeline
+import pandas as pd
+import os
+
+spark = sparknlp.start(gpu = True)# for GPU training >> sparknlp.start(gpu = True)
+
+print("Spark NLP version", sparknlp.version())
+print("Apache Spark version:", spark.version)
+
+spark
+
+
+from pyspark.sql.types import StructType, StructField, StringType, ArrayType
+from functools import reduce
+from pyspark.sql.functions import explode, split, desc, col, lower, regexp_replace, udf, trim, to_json, struct
+
+filter_condition = reduce(
+        lambda a, b: a & b,
+        [col(c).isNotNull() for c in ["heading", "bias_rating"]]
+    )
+
+trainDataset = (
+    spark
+    .read
+    .option("sep", "|")
+    .option("multiLine", "true")
+    .option("header", "true")
+    #.schema(custom_schema)
+    .csv("/content/allsides_news_complete3.csv")
+    .filter(filter_condition)
+    .select(col("heading").alias("text"), "bias_rating")
+  )
+trainDataset.show(5)
+
+trainDataset.count()
+
+trainDataset, testDataset = trainDataset.randomSplit([0.9, 0.1], seed = 2018)
+
+from pyspark.sql.functions import col
+trainDataset.groupBy("bias_rating") \
+    .count() \
+    .orderBy(col("count").desc()) \
+    .show()
+
+testDataset.groupBy("bias_rating") \
+      .count() \
+      .orderBy(col("count").desc()) \
+      .show()
+
+
+
+document_assembler = DocumentAssembler() \
+    .setInputCol("text") \
+    .setOutputCol("document")
+
+tokenizer = Tokenizer() \
+    .setInputCols(["document"]) \
+    .setOutputCol("token")
+
+
+bert_embeddings = BertEmbeddings().pretrained(name='small_bert_L8_512', lang='en') \
+.setInputCols(["document",'token'])\
+.setOutputCol("embeddings")
+
+embeddingsSentence = SentenceEmbeddings() \
+    .setInputCols(["document", "embeddings"]) \
+    .setOutputCol("sentence_embeddings") \
+    .setPoolingStrategy("AVERAGE")
+
+classsifierdl = ClassifierDLApproach()\
+    .setInputCols(["sentence_embeddings"])\
+    .setOutputCol("class")\
+    .setLabelColumn("bias_rating")\
+    .setMaxEpochs(100)\
+    .setLr(0.001)\
+    .setBatchSize(8)\
+    .setEnableOutputLogs(True)
+    #.setOutputLogsPath('logs')
+
+bert_clf_pipeline = Pipeline(
+    stages=[
+        document_assembler,
+        tokenizer,
+        bert_embeddings,
+        embeddingsSentence,
+        classsifierdl
+])
+
+bert_clf_pipelineModel = bert_clf_pipeline.fit(trainDataset)
+
+log_files = os.listdir("/root/annotator_logs")
+log_files
+
+log_file_name = os.listdir("/root/annotator_logs")[0]
+
+with open("/root/annotator_logs/"+log_file_name, "r") as log_file :
+    print(log_file.read())
+
+from sklearn.metrics import classification_report
+preds = bert_clf_pipelineModel.transform(testDataset)
+preds_df = preds.select('bias_rating','text',"class.result").toPandas()
+preds_df['result'] = preds_df['result'].apply(lambda x : x[0])
+print (classification_report(preds_df['bias_rating'], preds_df['result']))
+
+bert_clf_pipelineModel.save('bias-detection-model')
+
+
+import sparknlp
+
+from sparknlp.base import *
+from sparknlp.annotator import *
+from pyspark.ml import Pipeline
+import pandas as pd
+import os
+
+spark = sparknlp.start(gpu = True)# for GPU training >> sparknlp.start(gpu = True)
+
+print("Spark NLP version", sparknlp.version())
+print("Apache Spark version:", spark.version)
+
+spark
+
+
+
+from pyspark.sql.types import StructType, StructField, StringType, ArrayType
+from functools import reduce
+from pyspark.sql.functions import explode, split, desc, col, lower, regexp_replace, udf, trim, to_json, struct
+
+trainDataset = (
+    spark
+    .read
+    .option("header", False)
+    .option("delimiter", ",")
+    .option("multiLine", "true")
+    #.schema(custom_schema)
+    .csv("/content/sentiment-analysis.csv")
+    .select(col("_c0").alias("sentiment"), col("_c1").alias("text"))
+  )
+# Create a filter condition for non-null values for all columns
+
+trainDataset.show(truncate=50)
+
+trainDataset.count()
+
+trainDataset, testDataset = trainDataset.randomSplit([0.9, 0.1], seed = 2018)
+
+from pyspark.sql.functions import col
+
+trainDataset.groupBy("sentiment") \
+    .count() \
+    .orderBy(col("count").desc()) \
+    .show()
+
+testDataset.groupBy("sentiment") \
+      .count() \
+      .orderBy(col("count").desc()) \
+      .show()
+
+
+
+document_assembler = DocumentAssembler() \
+    .setInputCol("text") \
+    .setOutputCol("document")
+
+tokenizer = Tokenizer() \
+    .setInputCols(["document"]) \
+    .setOutputCol("token")
+
+
+bert_embeddings = BertEmbeddings().pretrained(name='small_bert_L8_512', lang='en') \
+.setInputCols(["document",'token'])\
+.setOutputCol("embeddings")
+
+embeddingsSentence = SentenceEmbeddings() \
+    .setInputCols(["document", "embeddings"]) \
+    .setOutputCol("sentence_embeddings") \
+    .setPoolingStrategy("AVERAGE")
+
+classsifierdl = ClassifierDLApproach()\
+    .setInputCols(["sentence_embeddings"])\
+    .setOutputCol("class")\
+    .setLabelColumn("sentiment")\
+    .setMaxEpochs(150)\
+    .setLr(0.001)\
+    .setBatchSize(8)\
+    .setEnableOutputLogs(True)
+    #.setOutputLogsPath('logs')
+
+bert_clf_pipeline = Pipeline(
+    stages=[
+        document_assembler,
+        tokenizer,
+        bert_embeddings,
+        embeddingsSentence,
+        classsifierdl
+])
+
+
+log_files = os.listdir("/root/annotator_logs")
+log_files
+
+log_file_name = os.listdir("/root/annotator_logs")[0]
+
+with open("/root/annotator_logs/"+log_file_name, "r") as log_file :
+    print(log_file.read())
+
+from sklearn.metrics import classification_report
+preds = bert_clf_pipelineModel.transform(testDataset)
+preds_df = preds.select('sentiment','text',"class.result").toPandas()
+preds_df['result'] = preds_df['result'].apply(lambda x : x[0])
+print (classification_report(preds_df['sentiment'], preds_df['result']))
+
+
+
+bert_clf_pipelineModel.save('sentiment-analysis-model')
+
+
+
+
+from pyspark.ml import PipelineModel
+loaded_pipeline_model = PipelineModel.load('sentiment-analysis-model')
+
+preds1 = loaded_pipeline_model.transform(testDataset)
+preds_df1 = preds1.select('sentiment','text',"class.result").toPandas()
+preds_df1['result'] = preds_df1['result'].apply(lambda x : x[0])
+print (classification_report(preds_df1['sentiment'], preds_df1['result']))
+
+
+
+
+
+
+
+
+
+
+
+import shutil
+
+
+
+import os
+os.environ["JAVA_HOME"] = "/usr/lib/jvm/java-8-openjdk-amd64"
+#os.environ["SPARK_HOME"] = "/content/spark-3.1.1-bin-hadoop3.2"
+
+!ls
+
+import findspark
+findspark.init()
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder \
+    .config("spark.jars", "/usr/local/lib/python3.10/dist-packages/pyspark/jars/graphframes-0.8.2-spark3.3.2-s_2.11.jar") \
+    .getOrCreate()
+
+spark.conf.set("spark.sql.repl.eagerEval.enabled", True)  # Property used to format output tables better\
+
+from pyspark.sql import SQLContext
+sc=spark.sparkContext
+sqlContext = SQLContext(sc)
+
+!pip install datasets==2.14.6
+!pip install 'transformers[torch]'
+!pip install torchvision
+!pip install evaluate
+!pip install mlflow
+
+!mkdir /content/model-dir
+
+
+df_train = spark.read.option("header","true").option("inferSchema","true").csv("/content/model-dir/news_category_train.csv").toDF("label","text")
+df_test = spark.read.option("header","true").option("inferSchema","true").csv("/content/model-dir/news_category_test.csv").toDF("label","text")
+df_train.count(), df_test.count()
+
+labels = df_train.select(df_train.label).groupBy(df_train.label).count().collect()
+id2label = {index: row.label for (index, row) in enumerate(labels)}
+label2id = {row.label: index for (index, row) in enumerate(labels)}
+label2id
+
+from pyspark.sql.functions import pandas_udf
+import pandas as pd
+@pandas_udf('integer')
+def replace_labels_with_ids(labels: pd.Series) -> pd.Series:
+  return labels.apply(lambda x: label2id[x])
+
+df_train_id_labels = df_train.select(replace_labels_with_ids(df_train.label).alias('label'), df_train.text)
+df_test_id_labels = df_test.select(replace_labels_with_ids(df_test.label).alias('label'), df_test.text)
+
+display(df_train_id_labels)
+
+
+import datasets
+train_dataset = datasets.Dataset.from_spark(df_train_id_labels, cache_dir="/dbfs/cache/train")
+test_dataset = datasets.Dataset.from_spark(df_test_id_labels, cache_dir="/dbfs/cache/test")
+
+from transformers import AutoTokenizer
+
+base_model = 'distilbert-base-uncased'
+
+tokenizer = AutoTokenizer.from_pretrained(base_model)
+def tokenize_function(examples):
+
+    return tokenizer(examples["text"], padding=False, truncation=True)
+
+train_tokenized = train_dataset.map(tokenize_function, batched=True)
+test_tokenized = test_dataset.map(tokenize_function, batched=True)
+
+train_dataset = train_tokenized.shuffle(seed=12)
+test_dataset = test_tokenized.shuffle(seed=12)
+
+
+import numpy as np
+import evaluate
+metric = evaluate.load("accuracy")
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    predictions = np.argmax(logits, axis=-1)
+    return metric.compute(predictions=predictions, references=labels)
+
+from transformers import DistilBertForSequenceClassification
+model = DistilBertForSequenceClassification.from_pretrained(
+        base_model,
+        num_labels=len(label2id),
+        label2id=label2id,
+        id2label=id2label
+)
+
+for name, param in model.named_parameters():
+    if name.startswith("distilbert."):
+        param.requires_grad = False
+
+for name, param in model.named_parameters():
+     print(name, param.requires_grad)
+
+training_output_dir = "/content/model-dir/trainer"
+
+from transformers import TrainingArguments, Trainer
+training_args = TrainingArguments(
+    output_dir=training_output_dir,
+    evaluation_strategy="epoch"
+    #num_train_epochs = 3.0
+)
+
+from transformers import DataCollatorWithPadding
+data_collator = DataCollatorWithPadding(tokenizer)
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_tokenized,
+    eval_dataset=test_tokenized,
+    compute_metrics=compute_metrics,
+    data_collator=data_collator,
+)
+
+model_output_dir = "/content/model-dir/model"
+model_artifact_path = "classification"
+
+import mlflow
+mlflow.set_tracking_uri('/content/model-dir/mlruns')
+
+from transformers import pipeline
+
+with mlflow.start_run() as run:
+  trainer.train()
+  trainer.save_model(model_output_dir)
+  pipe = pipeline("text-classification",
+                  model=DistilBertForSequenceClassification.from_pretrained(model_output_dir),
+                  batch_size=8,
+                  tokenizer=tokenizer,
+                  device=0)
+  model_info = mlflow.transformers.log_model(
+        transformers_model=pipe,
+        artifact_path=model_artifact_path,
+        input_example="India wins the cricket world cup!",
+    )
+
+!zip -r /content/model-dir.zip /content/model-dir
+
+from google.colab import files
+files.download("/content/model-dir.zip")
+
+
+logged_model = "runs:/{run_id}/{model_artifact_path}".format(
+    run_id=run.info.run_id,
+    model_artifact_path=model_artifact_path
+)
+
+loaded_model_udf = mlflow.pyfunc.spark_udf(spark, model_uri=logged_model, result_type='string')
+
+test = df_test.select(df_test.text, df_test.label, loaded_model_udf(df_test.text).alias("prediction"))
+display(test)
+
+
+
+
