@@ -4,6 +4,7 @@
 
 <!-- TOC -->
 * [Real-Time News Detection and Analysis using Deep Learning and Large Language Models](#real-time-news-detection-and-analysis-using-deep-learning-and-large-language-models-)
+  * [Submission details:](#submission-details)
   * [Execution Steps:](#execution-steps)
     * [Codebase setup:](#codebase-setup)
     * [Kafka and ELK setup:](#kafka-and-elk-setup)
@@ -13,6 +14,19 @@
     * [File description:](#file-description)
     * [Directory structure](#directory-structure)
 <!-- TOC -->
+
+---
+
+## Submission details:
+1. Submission contains a zip file of repository and this readme file.
+2. If there is an issue with zip file(due to size limits in e-learning) please clone the repository from: 
+   ```commandline
+    git clone https://github.com/harshalag21/media-bias-detector.git
+   ```
+3. Datasets are available at:
+    ```commandline
+     https://github.com/harshalag21/media-bias-detector/tree/main/models/training/data
+    ```
 
 ---
 
